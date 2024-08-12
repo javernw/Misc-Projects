@@ -1,0 +1,577 @@
+---
+title: "Bicycles TS"
+author: "Javern Wilson"
+date: "2024-08-09"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(forecast)
+library(fpp3)
+library(gridExtra)
+library(kableExtra)
+library(lubridate)
+library(prophet)
+library(caret)
+library(Metrics)
+library(randomForest)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+
+```{r bikes}
+bikes <- read_csv("Bikes sold data.csv")
+bikes <- bikes %>% rename("bike_price" = `Bike Price`, "num_bikes_sold" = `Number of Bikes Sold`)
+bikes$bike_price <- gsub("\\$", "", bikes$bike_price) |> as.numeric()
+bikes$Date <- as.Date.character(gsub("/", "-",bikes$Date), '%m-%d-%Y')
+head(bikes)
+
+```
+
+```{r}
+summary(bikes)
+```
+
+```{r}
+bikes$Sales <- (bikes$bike_price * bikes$num_bikes_sold) / 1e6
+bikes$num_bikes_sold <- bikes$num_bikes_sold / 1e6
+
+```
+
+### Daily
+```{r}
+bikes_ts <-bikes |> as_tsibble(index = Date)
+bikes_ts |> autoplot(Sales) +  
+  labs(y = "$ (millions)",
+       title = "Bikes Sales")
+```
+
+
+```{r}
+bikes_ts |> autoplot(num_bikes_sold) +  
+  labs(y = " (millions)",
+       title = "Bikes Sold Daily")
+```
+
+
+### Monthly
+
+```{r}
+monthly_data <- bikes %>%
+  mutate(YearMonth = floor_date(Date, "month")) %>%
+  group_by(YearMonth) %>%
+  summarize(
+    Avg_Bike_Price = mean(bike_price, na.rm = TRUE),
+    Total_Bikes_Sold = sum(num_bikes_sold, na.rm = TRUE)
+  )
+
+monthly_data$Total_Sales <- monthly_data$Avg_Bike_Price * monthly_data$Total_Bikes_Sold
+# Convert to tsibble for time series analysis
+monthly_data_ts <- as_tsibble(monthly_data, index = YearMonth)
+
+# View the tsibble
+print(monthly_data_ts)
+
+```
+
+
+```{r}
+monthly_data_ts |> autoplot(Total_Bikes_Sold) +  
+  labs(y = "$ (millions)",
+       title = "Bikes Sold by Month")
+```
+The time series graph shows the number of bikes sold by month in millions of dollars over a period of time, likely spanning from the late 1990s to the early 2020s.
+
+Key Observations:
+Early Growth (Late 1990s - Early 2000s): The series begins with a period of rapid growth, reaching a peak around the early 2000s. This indicates a sharp increase in bike sales during this time.
+
+Fluctuations and Decline (2000s): After the peak, there is a significant decline, followed by several fluctuations, with smaller peaks and valleys. The overall trend during the mid-to-late 2000s is downward, indicating decreasing sales with occasional short-lived increases.
+
+Stabilization and Further Decline (2010s): After 2010, the series shows a general stabilization with some volatility, but the overall trend is still downward, though less steep than in the previous decade.
+
+Recent Years: In the most recent years shown in the graph, there is another notable decline, with sales dropping to levels comparable to those seen at the beginning of the time series.
+
+Overall Trend:
+The time series illustrates an initial surge in bike sales, followed by a general decline, with occasional short-term increases. The recent trend suggests that bike sales are continuing to decline, possibly due to market saturation, changing consumer preferences, or other external factors affecting demand.
+
+```{r}
+monthly_data_ts |> autoplot(Total_Sales) +  
+  labs(y = "$ (millions)",
+       title = "Bikes Sales by Months")
+```
+Key Observations:
+Low Activity (Late 1990s - 2010s): For the majority of the timeline, from the late 1990s through the 2010s, bike sales remained relatively flat with minimal fluctuations. The sales figures during this period were consistently low, showing little to no significant growth.
+
+Sudden and Exponential Growth (Late 2010s - Early 2020s): Starting around the late 2010s, there is a dramatic and exponential increase in bike sales. This growth continues into the early 2020s, reaching a peak that is significantly higher than any previous levels.
+
+Sharp Decline: After reaching the peak, there is a noticeable and steep decline in sales. However, even after this drop, the sales remain substantially higher than the earlier years of the time series.
+
+Interpretation:
+The early part of the series suggests a period of stagnation in bike sales, with little change over time.
+The rapid increase in sales in the later part of the series could be attributed to various factors such as a surge in demand, possibly due to a specific event, innovation in bike technology, or a shift in consumer behavior (e.g., the COVID-19 pandemic may have influenced this spike).
+The sharp decline after the peak could indicate a market correction, a decrease in demand after a surge, or saturation.
+This graph illustrates a significant transformation in the bike market, with a period of rapid growth followed by a quick adjustment.
+
+
+
+### Comparison of the Two Graphs:
+First Graph (Number of Bikes Sold):
+
+Fluctuations and Decline: The number of bikes sold shows significant fluctuations over time, with high peaks in the early 2000s and subsequent declines. Even though the numbers vary, the overall trend is downward, indicating that the volume of bikes sold is generally decreasing.
+Second Graph (Total Sales Revenue):
+
+Low and Stable Revenue: For most of the timeline, total sales revenue remains flat, indicating relatively low sales in dollar terms.
+Exponential Growth in Revenue: A sudden and dramatic increase in revenue occurs in the late 2010s to early 2020s, suggesting a sharp rise in bike prices or a shift towards higher-value products. However, this increase is followed by a steep decline, although sales revenue remains higher than previous levels.
+Analysis:
+Higher Number of Bikes Sold but Lower Revenue:
+
+Lower-Priced Bikes: If the number of bikes sold is higher, but the revenue is low, it could suggest that the bikes being sold were of lower value or priced more affordably. During the early 2000s, there may have been high-volume sales of lower-cost bikes.
+Market Saturation: A large number of bikes sold in earlier periods might reflect market saturation, where the demand was high, but the price point was kept low to maintain or increase sales volume.
+Sudden Increase in Revenue with Fewer Units Sold:
+
+Higher-Priced Bikes: The exponential increase in revenue in the later years, despite a potentially lower number of bikes sold, suggests a shift towards selling more expensive, premium bikes. This could be due to advancements in technology, electric bikes, or a focus on high-end models that command a higher price.
+Pandemic Influence: The spike in revenue might also correspond with the COVID-19 pandemic, where demand for bikes surged, and consumers were willing to pay more, either due to increased interest in outdoor activities or supply chain disruptions that drove prices up.
+Sharp Decline in Sales and Revenue:
+
+After the peak in both graphs, the sharp decline could be due to several factors, including market correction, reduced consumer demand, or economic factors affecting purchasing power.
+Conclusion:
+The difference between the two graphs can be attributed to the shift in market dynamics from selling a high volume of low-cost bikes (reflected in the first graph) to fewer, but more expensive bikes (reflected in the second graph). This transition illustrates how the bike market has evolved, with changing consumer preferences, product offerings, and pricing strategies playing a significant role.
+
+
+### Analysis of Seasonality, Cyclic Behavior, and Trend
+1. First Image: Number of Bikes Sold
+Trend:
+
+There is a clear overall downward trend from the early 2000s to the early 2020s, with some fluctuations. The number of bikes sold generally decreases over time.
+Seasonality:
+
+There might be some seasonality, as the data shows frequent short-term fluctuations that could correspond to seasonal changes in demand (e.g., higher sales during warmer months or holiday seasons). However, without specific time labels on the x-axis, this is difficult to confirm definitively.
+Cyclic Behavior:
+
+Cyclic patterns are evident, especially the large peaks and valleys. These cycles could be driven by economic factors, shifts in consumer behavior, or broader market cycles. The cyclic behavior appears irregular, with periods of growth followed by declines.
+2. Second Image: Sales Revenue
+Trend:
+
+The trend is markedly different from the first image. For most of the timeline, there is little to no trend (flat), but in the late 2010s, there is a sharp upward trend, followed by a sudden decline. The overall trend is upward when considering the entire series.
+Seasonality:
+
+The image doesn’t clearly show any strong seasonality in the earlier periods, as sales remain flat. However, the rapid rise and fall in the later period could obscure any seasonal effects. If there is seasonality, it is less pronounced or overshadowed by the significant trend changes.
+Cyclic Behavior:
+
+Cyclic behavior is not prominent in the earlier periods, but the sharp rise and fall in recent years could indicate a cycle driven by specific market conditions, such as economic changes or global events like the COVID-19 pandemic. The cycle in this case is short-term but very pronounced.
+Summary:
+First Image (Number of Bikes Sold):
+
+Trend: Downward trend over time.
+Seasonality: Possible seasonality with frequent short-term fluctuations.
+Cyclic Behavior: Clear cyclic patterns with irregular cycles of peaks and valleys.
+Second Image (Sales Revenue):
+
+Trend: Long period of flat trend followed by a sharp upward trend and then a decline.
+Seasonality: Weak or overshadowed by the trend, especially in later years.
+Cyclic Behavior: Not prominent initially, but a short-term cycle appears with the recent sharp rise and fall.
+Both graphs show different aspects of the bike market, with the first focusing on volume (number of bikes sold) and the second on revenue, leading to different interpretations of trends, seasonality, and cyclic behavior.
+
+```{r}
+quarterly_data <- bikes %>%
+  mutate(YearQuarter = floor_date(Date, "quarter")) %>%
+  group_by(YearQuarter) %>%
+  summarize(
+    Avg_Bike_Price = mean(bike_price, na.rm = TRUE),
+    Total_Bikes_Sold = sum(num_bikes_sold, na.rm = TRUE)
+  )
+
+quarterly_data$Total_Sales <- quarterly_data$Avg_Bike_Price * quarterly_data$Total_Bikes_Sold
+# Convert to tsibble for time series analysis
+quarterly_data_ts <- as_tsibble(quarterly_data, index = YearQuarter)
+
+# View the tsibble
+#print(quarterly_data_ts)
+```
+```{r}
+quarterly_data_ts |> autoplot(Total_Bikes_Sold) +  
+  labs(y = "$ (millions)",
+       title = "Bikes Sold by Quarter")
+```
+
+
+```{r}
+quarterly_data_ts |> autoplot(Total_Sales) +  
+  labs(y = "$ (millions)",
+       title = "Bikes Sales by Quarter")
+```
+
+
+```{r}
+yearly_data <- bikes %>%
+  mutate(Year = floor_date(Date, "year")) %>%
+  group_by(Year) %>%
+  summarize(
+    Avg_Bike_Price = mean(bike_price, na.rm = TRUE),
+    Total_Bikes_Sold = sum(num_bikes_sold, na.rm = TRUE)
+  )
+
+yearly_data$Total_Sales <- yearly_data$Avg_Bike_Price * yearly_data$Total_Bikes_Sold
+# Convert to tsibble for time series analysis
+yearly_data_ts <- as_tsibble(yearly_data, index = Year)
+
+# View the tsibble
+#print(monthly_data_ts)
+```
+
+
+```{r}
+yearly_data_ts |> autoplot(Total_Bikes_Sold) +  
+  labs(y = "$ (millions)",
+       title = "Bikes Sold by Year")
+```
+
+
+```{r}
+yearly_data_ts |> autoplot(Total_Sales) +  
+  labs(y = "$ (millions)",
+       title = "Bikes Sales by Year")
+```
+
+```{r}
+monthly_data_ts2 <- ts(monthly_data$Total_Bikes_Sold, frequency = 12, start = 1999)
+```
+
+```{r}
+autoplot(monthly_data_ts2, main = "Bikes Sold: 1999-2024")
+```
+```{r}
+ggseasonplot(monthly_data_ts2, main = "Seasonal Plot: Bikes Sold")
+```
+
+### Seasonality Explanation:
+Peaks and Troughs by Month:
+
+April and June: There are noticeable peaks in bike sales around April and June across many years. This suggests that bike sales tend to increase during the spring and early summer months. The increase may be driven by factors such as warmer weather, outdoor activities, and perhaps holiday periods.
+September and November: Another set of peaks is observed around September and November, indicating a possible secondary increase in sales. This could be due to end-of-summer activities or back-to-school periods when bike sales might spike again.
+December: There is a drop in sales in December, which might reflect a seasonal decline as winter sets in, and fewer people are likely to buy bikes during colder months.
+Consistency in Seasonal Patterns:
+
+The seasonal peaks and troughs are relatively consistent across many years, indicating that bike sales follow a similar pattern annually. This recurring pattern is a hallmark of seasonality, where sales increase and decrease at predictable times of the year.
+Variability Across Years:
+
+While the overall seasonal pattern is consistent, there is variability in the magnitude of sales from year to year. Some years, like 2000 (orange line), show significantly higher peaks, especially in March and October, compared to other years. This suggests that while the seasonal pattern holds, the intensity of sales can vary due to factors like economic conditions, marketing efforts, or specific events in those years.
+Lows in January and February:
+
+The plot shows low sales in January and February across all years, which aligns with the expectation that fewer bikes are sold during the winter months when outdoor cycling is less common.
+Summary:
+The plot clearly illustrates a seasonal pattern in bike sales, with highs in spring and early summer (April to June) and secondary peaks in September to November. Sales tend to be lowest during the winter months (January, February, and December). The consistent yet variable pattern across different years reflects a strong seasonal influence on bike sales.
+
+
+### Decomposition with STL (Seasonal and Trend decomposition using Loess)
+
+```{r}
+autoplot(decompose(monthly_data_ts2, type = "additive"))
+autoplot(decompose(monthly_data_ts2, type = "multiplicative"))
+
+autoplot(stl(monthly_data_ts2,t.window=13, s.window="periodic", robust=TRUE)) + 
+  labs(title = "STL Decomposition of bikes sold")
+```
+
+
+
+
+
+## Modeling
+
+### Compare Models
+```{r}
+
+
+# Split the data into training and testing sets
+train_size <- floor(0.8 * length(monthly_data_ts2))
+train <- window(monthly_data_ts2, end=c(1999, train_size))
+test <- window(monthly_data_ts2, start=c(1999, train_size + 1))
+
+# Function to calculate and print accuracy metrics
+calculate_accuracy <- function(forecasted_values, actual_values) {
+  mae <- mae(actual_values, forecasted_values)
+  rmse <- rmse(actual_values, forecasted_values)
+  print(paste("MAE:", mae))
+  print(paste("RMSE:", rmse))
+  return(list(MAE = mae, RMSE = rmse))
+}
+```
+
+
+### Build Models
+
+```{r}
+# 1. ARIMA Model
+arima_model <- auto.arima(train)
+arima_forecast <- forecast(arima_model, h=length(test))
+print("ARIMA Model Accuracy:")
+arima_accuracy <- calculate_accuracy(arima_forecast$mean, test)
+
+# 2. Exponential Smoothing (ETS) Model
+ets_model <- ets(train)
+ets_forecast <- forecast(ets_model, h=length(test))
+print("ETS Model Accuracy:")
+ets_accuracy <- calculate_accuracy(ets_forecast$mean, test)
+
+# 3. Moving Average Model (MA)
+ma_model <- ma(train, order=3)  # Simple moving average with a window of 3
+ma_forecast <- forecast(ma_model, h=length(test))
+print("Moving Average Model Accuracy:")
+ma_accuracy <- calculate_accuracy(ma_forecast$mean, test)
+
+# 4. Seasonal ARIMA (SARIMA) Model
+sarima_model <- auto.arima(train, seasonal=TRUE)
+sarima_forecast <- forecast(sarima_model, h=length(test))
+print("SARIMA Model Accuracy:")
+sarima_accuracy <- calculate_accuracy(sarima_forecast$mean, test)
+
+# 5. Holt-Winters Model
+hw_model <- HoltWinters(train)
+hw_forecast <- forecast(hw_model, h=length(test))
+print("Holt-Winters Model Accuracy:")
+hw_accuracy <- calculate_accuracy(hw_forecast$mean, test)
+
+# 6. Random Forest Model
+# Prepare lagged features for Random Forest
+train_rf <- data.frame(y = as.numeric(train), lag1 = stats::lag(train, -1), lag2 = stats::lag(train, -2))
+train_rf <- na.omit(train_rf)  # Remove NA values
+rf_model <- randomForest(y ~ lag1 + lag2, data=train_rf)
+
+# Prepare test data
+test_rf <- data.frame(lag1 = stats::lag(test, -1), lag2 = stats::lag(test, -2))
+test_rf <- na.omit(test_rf)
+rf_pred <- predict(rf_model, newdata=test_rf)
+
+print("Random Forest Model Accuracy:")
+rf_accuracy <- calculate_accuracy(rf_pred, as.numeric(test[-c(1:2)]))
+```
+
+### Compare Models
+
+```{r}
+# Compare the models based on MAE
+model_comparison <- data.frame(
+  Model = c("ARIMA", "ETS", "Moving_Avg", "SARIMA", "Holt-Winters", "Random Forest"),
+  MAE = c(arima_accuracy$MAE, ets_accuracy$MAE, ma_accuracy$MAE, sarima_accuracy$MAE, hw_accuracy$MAE, rf_accuracy$MAE),
+  RMSE = c(arima_accuracy$RMSE, ets_accuracy$RMSE, ma_accuracy$RSME, sarima_accuracy$RSME, hw_accuracy$RSME, rf_accuracy$RMSE)
+)
+
+print("Model Comparison:")
+print(model_comparison)
+
+```
+Summary of the Data:
+ARIMA:
+
+MAE: 2165.713
+RMSE: 2684.991
+Interpretation: ARIMA has moderate error values, indicating it has reasonable accuracy but could potentially be outperformed by other models.
+ETS:
+
+MAE: 1961.555
+RMSE: 2553.028
+Interpretation: ETS has the lowest MAE and RMSE values, suggesting that it is the best-performing model among the three in terms of both average and squared errors.
+Random Forest:
+
+MAE: 2441.071
+RMSE: 3186.757
+Interpretation: Random Forest has the highest MAE and RMSE values, indicating that its forecasts are less accurate compared to the other two models.
+Conclusion:
+The table is a model comparison that helps in evaluating which forecasting method provides the most accurate predictions. ETS appears to have the best performance, with the lowest error metrics, while Random Forest has the highest errors, suggesting it may not be the best choice for this particular time series forecasting task.
+
+
+Holt-Winters model came close, with an MAE of 2.0683 and an RMSE of 2.6544. It performed slightly worse than ETS but still showed strong results.
+
+Moving Average had an MAE of 2.1442 and an RMSE of 2.5962. It was better than ARIMA and SARIMA but less accurate than ETS and Holt-Winters.
+
+ARIMA (AutoRegressive Integrated Moving Average) and SARIMA (Seasonal ARIMA) both had the same MAE of 2.1657 and RMSE of 2.6850, placing them in the middle of the pack.
+
+Random Forest showed higher errors with an MAE of 2.4416 and an RMSE of 3.1870, indicating a less accurate model compared to the others.
+
+Linear Regression had similar performance to Random Forest with an MAE of 2.4371 and an RMSE of 3.1851, slightly better than Random Forest but still among the less accurate models.
+
+In summary, ETS performed the best, followed closely by Holt-Winters, with Moving Average, ARIMA, and SARIMA showing intermediate performance. Random Forest and Linear Regression were the least accurate among the models tested.
+
+
+
+### Viz of how models did
+```{r}
+
+# Create a data frame with all the necessary information
+df <- data.frame(
+  Year = as.numeric(time(test)), 
+  Actual = as.numeric(test), 
+  ARIMA = as.numeric(arima_forecast$mean),
+  ETS = as.numeric(ets_forecast$mean),
+  MA = as.numeric(ma_forecast$mean),
+  SARIMA = as.numeric(sarima_forecast$mean),
+  HW = as.numeric(hw_forecast$mean),
+  RF = as.numeric(rf_pred)
+)
+
+# Convert the data frame into a long format for ggplot2
+df_long <- df %>%
+  gather(key = "Model", value = "Value", -Year)  # Reshape the data
+
+# Plot using ggplot2
+ggplot(df_long, aes(x = Year, y = Value, color = Model)) +
+  geom_line(size = 1) +
+  labs(title = "Model Comparison", y = "Bikes Sold", x = "Year") +
+  scale_color_manual(values = c("Actual" = "green", "ARIMA" = "blue", "SARIMA" = "orange", "ETS" = "red", "MA" = "yellow", "HW" = "brown", "RF" = "purple")) +
+  theme_minimal() +
+  theme(legend.title = element_blank()) 
+
+```
+The image you provided shows a forecast comparison between actual bike sales data and predictions made by three models: ARIMA, ETS, and RF (Random Forest).
+You mentioned that the Random Forest (RF) model has the highest Mean Absolute Error (MAE) and Root Mean Square Error (RMSE) but fits closest to the actual data. Here's why this might happen:
+1. **Overfitting**: The RF model might be overfitting the data, meaning it captures not only the true patterns but also the noise within the training data. This could make the RF predictions appear closer to the actual values in some cases, especially in the short term, but overfitting generally leads to higher error rates when applied to new or unseen data.
+2. **Model Complexity**: RF is a more complex model compared to ARIMA and ETS. While this complexity allows it to capture more intricate patterns, it can also lead to higher errors because it may be sensitive to variations and noise in the data that other models might smooth over or ignore.
+3. **Error Metrics**: MAE and RMSE are aggregate error metrics that summarize the overall deviation between the forecasted and actual values across the entire dataset. While RF might closely follow the actual data points in certain regions, larger deviations in other regions can increase these error metrics. These metrics do not always reflect the model's ability to follow the general trend but rather its overall accuracy across the dataset.
+4. **Variance in Data**: If the data has a lot of variability, models like ARIMA and ETS may smooth out these fluctuations, leading to lower MAE and RMSE but less detailed fitting. RF, on the other hand, might capture these fluctuations, leading to a better visual fit but higher error metrics due to the variability it introduces.
+In summary, the RF model might appear to fit the actual data more closely in a visual sense because it captures more of the fine-grained patterns (including noise), but this doesn't necessarily mean it's the most accurate model in a broader sense, which is why the error metrics are higher.
+
+
+## Forecast Result to Test Set
+```{r}
+# Convert the forecast object to a data frame for ggplot2
+forecast_df <- data.frame(
+ Date = time(ets_forecast$mean),
+ Forecast = as.numeric(ets_forecast$mean),
+ Lower80 = ets_forecast$lower[,1],
+ Upper80 = ets_forecast$upper[,1],
+ Lower95 = ets_forecast$lower[,2],
+ Upper95 = ets_forecast$upper[,2]
+)
+# Convert test data to a data frame
+test_df <- data.frame(
+ Date = time(test),
+ Actual = as.numeric(test)
+)
+# Plot using ggplot2
+ggplot() +
+ geom_line(data=test_df, aes(x=Date, y=Actual), color="red", size=1) +
+ geom_line(data=forecast_df, aes(x=Date, y=Forecast), color="blue", size=1) +
+ geom_ribbon(data=forecast_df, aes(x=Date, ymin=Lower95, ymax=Upper95), fill="blue", alpha=0.2) +
+ geom_ribbon(data=forecast_df, aes(x=Date, ymin=Lower80, ymax=Upper80), fill="blue", alpha=0.3) +
+  scale_color_manual(values = c("Actual" = "red", "Forecast" = "blue")) + 
+  scale_fill_manual(values = c("95% Confidence Interval" = "blue", "80% Confidence Interval" = "blue")) +
+ labs(title="ETS Model Forecast vs Actual",
+      x="Year",
+      y="Bikes Sold") +
+ theme_minimal() +
+ theme(plot.title = element_text(hjust = 0.5)) +
+ scale_x_continuous(breaks = scales::pretty_breaks(n=10))
+```
+
+### Forecast for the next 2 years
+```{r}
+forecast_horizon <- 2 * frequency(monthly_data_ts2)
+
+ets_model <- ets(monthly_data_ts2)
+ets_forecast <- forecast(ets_model, h=forecast_horizon)
+
+
+
+# Convert the forecast object to a data frame for ggplot2
+forecast_df <- data.frame(
+ Date = time(ets_forecast$mean),
+ Forecast = as.numeric(ets_forecast$mean),
+ Lower80 = ets_forecast$lower[,1],
+ Upper80 = ets_forecast$upper[,1],
+ Lower95 = ets_forecast$lower[,2],
+ Upper95 = ets_forecast$upper[,2]
+)
+# Convert actual data to a data frame for plotting
+actual_df <- data.frame(
+ Date = time(monthly_data_ts2),
+ Actual = as.numeric(monthly_data_ts2)
+)
+# Plot the forecast using ggplot2
+ggplot() +
+ geom_line(data=actual_df, aes(x=Date, y=Actual, color="Actual"), size=0.5) +
+ geom_line(data=forecast_df, aes(x=Date, y=Forecast, color="Forecast"), size=1) +
+ geom_ribbon(data=forecast_df, aes(x=Date, ymin=Lower95, ymax=Upper95, fill="95% Confidence Interval"), alpha=0.2) +
+ geom_ribbon(data=forecast_df, aes(x=Date, ymin=Lower80, ymax=Upper80, fill="80% Confidence Interval"), alpha=0.3) +
+ scale_color_manual(values=c("Actual"="black", "Forecast"="blue")) +
+ scale_fill_manual(values=c("95% Confidence Interval"="blue", "80% Confidence Interval"="blue")) +
+ labs(title="ETS Model Forecast for the Next 2 Years",
+      x="Year",
+      y="Bikes Sold",
+      color="Legend",
+      fill="Confidence Interval") +
+ theme_minimal() +
+ theme(plot.title = element_text(hjust = 0.5)) +
+ scale_x_continuous(breaks = scales::pretty_breaks(n=10))
+```
+
+```{r}
+
+hw_model <- HoltWinters(monthly_data_ts2)
+hw_forecast <- forecast(hw_model, h=forecast_horizon)
+
+# Convert the forecast object to a data frame for ggplot2
+forecast_df <- data.frame(
+ Date = time(hw_forecast$mean),
+ Forecast = as.numeric(hw_forecast$mean),
+ Lower80 = hw_forecast$lower[,1],
+ Upper80 = hw_forecast$upper[,1],
+ Lower95 = hw_forecast$lower[,2],
+ Upper95 = hw_forecast$upper[,2]
+)
+# Convert actual data to a data frame for plotting
+actual_df <- data.frame(
+ Date = time(monthly_data_ts2),
+ Actual = as.numeric(monthly_data_ts2)
+)
+# Plot the forecast using ggplot2
+ggplot() +
+ geom_line(data=actual_df, aes(x=Date, y=Actual, color="Actual"), size=0.5) +
+ geom_line(data=forecast_df, aes(x=Date, y=Forecast, color="Forecast"), size=1) +
+ geom_ribbon(data=forecast_df, aes(x=Date, ymin=Lower95, ymax=Upper95, fill="95% Confidence Interval"), alpha=0.2) +
+ geom_ribbon(data=forecast_df, aes(x=Date, ymin=Lower80, ymax=Upper80, fill="80% Confidence Interval"), alpha=0.3) +
+ scale_color_manual(values=c("Actual"="black", "Forecast"="blue")) +
+ scale_fill_manual(values=c("95% Confidence Interval"="blue", "80% Confidence Interval"="blue")) +
+ labs(title="Holts-Winters Model Forecast for the Next 2 Years",
+      x="Year",
+      y="Bikes Sold",
+      color="Legend",
+      fill="Confidence Interval") +
+ theme_minimal() +
+ theme(plot.title = element_text(hjust = 0.5)) +
+ scale_x_continuous(breaks = scales::pretty_breaks(n=10))
+
+```
+
+
+
+
+
+
+```{r}
+linear_model <- lm(Total_Bikes_Sold ~ Avg_Bike_Price, data = monthly_data)
+```
+
+
+```{r}
+summary(linear_model)
+```
+
+```{r}
+ggplot(monthly_data, aes(x = Avg_Bike_Price, y = Total_Bikes_Sold)) +
+ geom_point(color = "blue") +
+ geom_smooth(method = "lm", se = FALSE, color = "red") +
+ labs(title = "Linear Regression: Number of Bikes Sold vs. Price",
+      x = "Bike Price ($)", y = "Number of Bikes Sold") +
+ theme_minimal()
+```
